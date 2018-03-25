@@ -31,8 +31,6 @@ class LocationSensitiveAttention(BahdanauAttention):
 
     This replaces the superclass implementation in order to add in the location term.
 
-    TODO: it looks like the signature of this method is going to change in TF 1.5
-
     Args:
       query: Tensor of shape `[N, num_units]`.
       state: Tensor of shape `[N, T_in]`
