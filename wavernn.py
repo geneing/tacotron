@@ -4,18 +4,20 @@
 import matplotlib.pyplot as plt
 import time, sys, math
 import numpy as np
-import torch
-from torch.autograd import Variable 
-from torch import optim
-import torch.nn as nn
-import torch.nn.functional as F
+import tensorflow as tf
+import tensorflow.contrib.eager as tfe
+
 from scipy.io import wavfile
-#from utils import *
+
+tf.enable_eager_execution()
+tf.logging.set_verbosity(tf.logging.INFO)
 
 #%%
 
+
 def display(string, variables) :
     sys.stdout.write(f'\r{string}' % variables)
+
 
 def load_wav(filename, sample_rate, encode_16bits=True) :
     x = librosa.load(filename, sr=sample_rate)[0]
@@ -23,10 +25,12 @@ def load_wav(filename, sample_rate, encode_16bits=True) :
         x = np.clip(x * 2**15, -2**15, 2**15 - 1).astype(np.int16)
     return x
 
+
 def save_wav(y, filename, sample_rate) :
     if y.dtype != 'int16' : y *= 2**15
     y = np.clip(y, -2**15, 2**15 - 1)
     wavfile.write(filename, sample_rate, y.astype(np.int16))
+
 
 def split_signal(x) :
     unsigned = x + 2**15
@@ -34,8 +38,10 @@ def split_signal(x) :
     fine = unsigned % 256
     return coarse, fine
 
+
 def combine_signal(coarse, fine) :
     return coarse * 256 + fine - 2**15
+
 
 def time_since(started) :
     elapsed = time.time() - started
@@ -54,11 +60,14 @@ def time_since(started) :
 
 sample_rate = 24000
 
+
 def sine_wave(freq, length, sample_rate=sample_rate) : 
     return np.sin(np.arange(length) * 2 * math.pi * freq / sample_rate).astype(np.float32)
 
+
 def encode_16bits(x) : 
     return np.clip(x * 2**15, -2**15, 2**15 - 1).astype(np.int16)
+
 
 def split_signal(x) :
     encoded = encode_16bits(x)
@@ -67,15 +76,16 @@ def split_signal(x) :
     fine = unsigned % 256
     return coarse, fine
 
+
 signal = sine_wave(1, 100000)
 c, f = split_signal(signal)
 
- 
+
 #plt.plot(c[30000:32000])
 #plt.plot(f[30000:32000])
 
 #%%
-class WaveRNN(nn.Module) :
+class WaveRNN(tf.keras.Model):
     def __init__(self, hidden_size=896, quantisation=256) :
         super(WaveRNN, self).__init__()
         
@@ -83,64 +93,62 @@ class WaveRNN(nn.Module) :
         self.split_size = hidden_size // 2
         
         # The main hidden state matmul
-        self.R = nn.Linear(self.hidden_size, 3 * self.hidden_size, bias=False)
+        #self.hidden_size,
+        self.R = tf.keras.layers.Dense(3 * self.hidden_size, use_bias=False)
         
         # Output fc layers
-        self.O1 = nn.Linear(self.split_size, self.split_size)
-        self.O2 = nn.Linear(self.split_size, quantisation)
-        self.O3 = nn.Linear(self.split_size, self.split_size)
-        self.O4 = nn.Linear(self.split_size, quantisation)
+        self.O1 = tf.keras.layers.Dense(self.split_size)
+        self.O2 = tf.keras.layers.Dense(quantisation)
+        self.O3 = tf.keras.layers.Dense(self.split_size)
+        self.O4 = tf.keras.layers.Dense(quantisation)
         
         # Input fc layers
-        self.I_coarse = nn.Linear(2, 3 * self.split_size, bias=False)
-        self.I_fine = nn.Linear(3, 3 * self.split_size, bias=False)
+        self.I_coarse = tf.keras.layers.Dense( 3 * self.split_size, use_bias=False)
+        self.I_fine = tf.keras.layers.Dense( 3 * self.split_size, use_bias=False)
 
         # biases for the gates
-        self.bias_u = nn.Parameter(torch.zeros(self.hidden_size))
-        self.bias_r = nn.Parameter(torch.zeros(self.hidden_size))
-        self.bias_e = nn.Parameter(torch.zeros(self.hidden_size))
-        
-        # display num params
-        self.print_stats()
+        self.bias_u = tfe.Variable(tf.zeros(self.hidden_size), name='bias_u')
+        self.bias_r = tfe.Variable(tf.zeros(self.hidden_size), name='bias_r')
+        self.bias_e = tfe.Variable(tf.zeros(self.hidden_size), name='bias_e')
 
-        
-    def forward(self, prev_y, prev_hidden, current_coarse) :
-        
+    def call(self, inputs, training=False) :
+        prev_y, prev_hidden, current_coarse = inputs
         # Main matmul - the projection is split 3 ways
         R_hidden = self.R(prev_hidden)
-        R_u, R_r, R_e, = torch.split(R_hidden, self.hidden_size, dim=1)
+        R_u, R_r, R_e = tf.split(R_hidden, 3, axis=1) #tf.keras.layers.Lambda(lambda z: tf.split(z, 3, axis=1), arguments=R_hidden)
         
         # Project the prev input 
         coarse_input_proj = self.I_coarse(prev_y)
         I_coarse_u, I_coarse_r, I_coarse_e = \
-            torch.split(coarse_input_proj, self.split_size, dim=1)
+            tf.split(coarse_input_proj, 3, axis=1)
+            #tf.keras.layers.Lambda(lambda z: tf.split(z, 3, axis=1), arguments=coarse_input_proj)
         
         # Project the prev input and current coarse sample
-        fine_input = torch.cat([prev_y, current_coarse], dim=1)
+        fine_input = tf.concat([prev_y, current_coarse], axis=1)
         fine_input_proj = self.I_fine(fine_input)
         I_fine_u, I_fine_r, I_fine_e = \
-            torch.split(fine_input_proj, self.split_size, dim=1)
+            tf.split(fine_input_proj, 3, axis=1)
         
         # concatenate for the gates
         # TODO: Simplify all of this business 
-        I_u = torch.cat([I_coarse_u, I_fine_u], dim=1)
-        I_r = torch.cat([I_coarse_r, I_fine_r], dim=1)
-        I_e = torch.cat([I_coarse_e, I_fine_e], dim=1)
+        I_u = tf.concat([I_coarse_u, I_fine_u], axis=1)
+        I_r = tf.concat([I_coarse_r, I_fine_r], axis=1)
+        I_e = tf.concat([I_coarse_e, I_fine_e], axis=1)
         
         # Compute all gates for coarse and fine 
-        u = F.sigmoid(R_u + I_u + self.bias_u)
-        r = F.sigmoid(R_r + I_r + self.bias_r)
-        e = F.tanh(r * R_e + I_e + self.bias_e)
+        u = tf.sigmoid(R_u + I_u + self.bias_u, name='u')
+        r = tf.sigmoid(R_r + I_r + self.bias_r, name='r')
+        e = tf.tanh(r * R_e + I_e + self.bias_e, name='e')
         hidden = u * prev_hidden + (1. - u) * e
         
         # Split the hidden state
-        hidden_coarse, hidden_fine = torch.split(hidden, self.split_size, dim=1)
+        hidden_coarse, hidden_fine = tf.split(hidden, 2, axis=1)
         
         # Compute outputs 
-        out_coarse = self.O2(F.relu(self.O1(hidden_coarse)))
-        out_fine = self.O4(F.relu(self.O3(hidden_fine)))
+        out_coarse = self.O2(tf.nn.relu(self.O1(hidden_coarse)))
+        out_fine = self.O4(tf.nn.relu(self.O3(hidden_fine)))
 
-        return out_coarse, out_fine, hidden
+        return [out_coarse, out_fine, hidden]
     
         
     def generate(self, seq_len) :
@@ -234,7 +242,8 @@ class WaveRNN(nn.Module) :
         
              
     def init_hidden(self, batch_size=1) :
-        return (Variable(torch.zeros(batch_size, self.hidden_size)).cuda())
+        return tfe.Variable(tf.zeros([batch_size, self.hidden_size],dtype=float32), name='hidden_val')
+        
     
     
     def print_stats(self) :
@@ -243,11 +252,11 @@ class WaveRNN(nn.Module) :
         print('Trainable Parameters: %.3f million' % parameters)
 
 
-#%%
+##%%
 
-model = WaveRNN().cuda()
+model = WaveRNN()
 
-#%%
+##%%
 x = sine_wave(freq=500, length=sample_rate * 30)
 coarse_classes, fine_classes = split_signal(x)
 coarse_classes = np.reshape(coarse_classes, (1, -1))
@@ -262,42 +271,51 @@ def train(model, optimizer, num_steps, seq_len=960) :
         
         loss = 0
         hidden = model.init_hidden()
-        optimizer.zero_grad()
+        #optimizer.zero_grad()
         rand_idx = np.random.randint(0, coarse_classes.shape[1] - seq_len - 1)
         
-        for i in range(seq_len) :
-            
-            j = rand_idx + i
-            
-            x_coarse = coarse_classes[:, j:j + 1]
-            x_fine = fine_classes[:, j:j + 1]
-            x_input = np.concatenate([x_coarse, x_fine], axis=1)
-            x_input = x_input / 127.5 - 1.
-            x_input = Variable(torch.FloatTensor(x_input)).cuda()
-            
-            y_coarse = coarse_classes[:, j + 1]
-            y_fine = fine_classes[:, j + 1]
-            y_coarse = Variable(torch.LongTensor(y_coarse)).cuda()
-            y_fine = Variable(torch.LongTensor(y_fine)).cuda()
-            
-            current_coarse = y_coarse.float() / 127.5 - 1.
-            current_coarse = current_coarse.unsqueeze(-1)
-            
-            out_coarse, out_fine, hidden = model(x_input, hidden, current_coarse)
-            
-            loss_coarse = F.cross_entropy(out_coarse, y_coarse)
-            loss_fine = F.cross_entropy(out_fine, y_fine)
-            loss += (loss_coarse + loss_fine)
+        with tfe.GradientTape() as tape:
+            for i in range(seq_len) :
+
+                j = rand_idx + i
+
+                x_coarse = coarse_classes[:, j:j + 1]
+                x_fine = fine_classes[:, j:j + 1]
+                x_input = np.concatenate([x_coarse, x_fine], axis=1)
+                x_input = x_input / 127.5 - 1.
+                x_input = tfe.Variable(x_input, dtype=float32)
+
+                y_coarse = coarse_classes[:, j + 1]
+                y_fine = fine_classes[:, j + 1]
+                y_coarse = tfe.Variable(y_coarse)
+                y_fine = tfe.Variable(y_fine)
+
+                current_coarse = tf.cast(y_coarse, dtype=float32) / 127.5 - 1.
+                current_coarse = tf.expand_dims(current_coarse, axis=0)
+
+                out_coarse, out_fine, hidden = model([x_input, hidden, current_coarse])
+
+                loss_coarse = tf.losses.sparse_softmax_cross_entropy(y_coarse, out_coarse )
+                loss_fine = tf.losses.sparse_softmax_cross_entropy(y_fine, out_fine)
+                loss += (loss_coarse + loss_fine)
+
+        running_loss += (loss / seq_len)
         
-        running_loss += (loss.data[0] / seq_len)
-        loss.backward()
-        optimizer.step()
+        grad = tape.gradient(loss, model.variables)
+        optimizer.apply_gradients(zip(grad, model.variables), global_step=tf.train.get_or_create_global_step())
         
         speed = (step + 1) / (time.time() - start)
         
         sys.stdout.write('\rStep: %i/%i --- NLL: %.2f --- Speed: %.3f batches/second ' % 
                         (step + 1, num_steps, running_loss / (step + 1), speed))    
-        
-optimizer = optim.Adam(model.parameters(), lr=1e-3)
-train(model, optimizer, num_steps=50)
+
+with tf.device("/gpu:0"):        
+    optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
+    train(model, optimizer, num_steps=50)
+
+#%%
+
+output, c, f = model.generate(5000)
+
+plt.plot(output[:300])
         
