@@ -121,8 +121,7 @@ class WaveRNN(tf.keras.Model):
         coarse_input_proj = self.I_coarse(prev_y)
         I_coarse_u, I_coarse_r, I_coarse_e = \
             tf.split(coarse_input_proj, 3, axis=1)
-            #tf.keras.layers.Lambda(lambda z: tf.split(z, 3, axis=1), arguments=coarse_input_proj)
-        
+
         # Project the prev input and current coarse sample
         fine_input = tf.concat([prev_y, current_coarse], axis=1)
         fine_input_proj = self.I_fine(fine_input)
@@ -154,16 +153,16 @@ class WaveRNN(tf.keras.Model):
     def generate(self, seq_len) :
         
         # First split up the biases for the gates 
-        b_coarse_u, b_fine_u = torch.split(self.bias_u, self.split_size)
-        b_coarse_r, b_fine_r = torch.split(self.bias_r, self.split_size)
-        b_coarse_e, b_fine_e = torch.split(self.bias_e, self.split_size)
+        b_coarse_u, b_fine_u = tf.split(self.bias_u, 2)
+        b_coarse_r, b_fine_r = tf.split(self.bias_r, 2)
+        b_coarse_e, b_fine_e = tf.split(self.bias_e, 2)
         
         # Lists for the two output seqs
         c_outputs, f_outputs = [], []
         
         # Some initial inputs
-        out_coarse = Variable(torch.LongTensor([0])).cuda()
-        out_fine = Variable(torch.LongTensor([0])).cuda()
+        out_coarse = tfe.Variable(np.zeros([1]))
+        out_fine = tfe.Variable(np.zeros([1]))
         
         # We'll meed a hidden state
         hidden = self.init_hidden()
@@ -176,59 +175,59 @@ class WaveRNN(tf.keras.Model):
             
             # Split into two hidden states
             hidden_coarse, hidden_fine = \
-                torch.split(hidden, self.split_size, dim=1)
+                tf.split(hidden, 2, axis=1)
             
             # Scale and concat previous predictions
-            out_coarse = out_coarse.unsqueeze(0).float() / 127.5 - 1.
-            out_fine = out_fine.unsqueeze(0).float() / 127.5 - 1.
-            prev_outputs = torch.cat([out_coarse, out_fine], dim=1)
+            out_coarse = tf.cast(tf.expand_dims(out_coarse, axis=0), dtype=tf.int64) / 127.5 - 1.
+            out_fine = tf.cast(tf.expand_dims(out_fine, axis=0), dtype=tf.int64) / 127.5 - 1.
+            prev_outputs = tf.concatenate([out_coarse, out_fine], axis=1)
             
             # Project input 
             coarse_input_proj = self.I_coarse(prev_outputs)
             I_coarse_u, I_coarse_r, I_coarse_e = \
-                torch.split(coarse_input_proj, self.split_size, dim=1)
+                tf.split(coarse_input_proj, 3, axis=1)
             
             # Project hidden state and split 6 ways
             R_hidden = self.R(hidden)
             R_coarse_u , R_fine_u, \
             R_coarse_r, R_fine_r, \
-            R_coarse_e, R_fine_e = torch.split(R_hidden, self.split_size, dim=1)
+            R_coarse_e, R_fine_e = tf.split(R_hidden, 6, axis=1)
         
             # Compute the coarse gates
-            u = F.sigmoid(R_coarse_u + I_coarse_u + b_coarse_u)
-            r = F.sigmoid(R_coarse_r + I_coarse_r + b_coarse_r)
-            e = F.tanh(r * R_coarse_e + I_coarse_e + b_coarse_e)
+            u = tf.sigmoid(R_coarse_u + I_coarse_u + b_coarse_u)
+            r = tf.sigmoid(R_coarse_r + I_coarse_r + b_coarse_r)
+            e = tf.tanh(r * R_coarse_e + I_coarse_e + b_coarse_e)
             hidden_coarse = u * hidden_coarse + (1. - u) * e
             
             # Compute the coarse output
-            out_coarse = self.O2(F.relu(self.O1(hidden_coarse)))
-            posterior = F.softmax(out_coarse, dim=1).view(-1)
-            distrib = torch.distributions.Categorical(posterior)
+            out_coarse = self.O2(tf.relu(self.O1(hidden_coarse)))
+            posterior = tf.softmax(out_coarse, dim=1).view(-1)
+            distrib = tf.distributions.Categorical(posterior)
             out_coarse = distrib.sample()
             c_outputs.append(out_coarse)
             
             # Project the [prev outputs and predicted coarse sample]
             coarse_pred = out_coarse.float() / 127.5 - 1.
-            fine_input = torch.cat([prev_outputs, coarse_pred.unsqueeze(0)], dim=1)
+            fine_input = tf.concatenate([prev_outputs, coarse_pred.unsqueeze(0)], dim=1)
             fine_input_proj = self.I_fine(fine_input)
             I_fine_u, I_fine_r, I_fine_e = \
-                torch.split(fine_input_proj, self.split_size, dim=1)
+                tf.split(fine_input_proj, 3, axis=1)
             
             # Compute the fine gates
-            u = F.sigmoid(R_fine_u + I_fine_u + b_fine_u)
-            r = F.sigmoid(R_fine_r + I_fine_r + b_fine_r)
-            e = F.tanh(r * R_fine_e + I_fine_e + b_fine_e)
+            u = tf.sigmoid(R_fine_u + I_fine_u + b_fine_u)
+            r = tf.sigmoid(R_fine_r + I_fine_r + b_fine_r)
+            e = tf.tanh(r * R_fine_e + I_fine_e + b_fine_e)
             hidden_fine = u * hidden_fine + (1. - u) * e
         
             # Compute the fine output
-            out_fine = self.O4(F.relu(self.O3(hidden_fine)))
-            posterior = F.softmax(out_fine, dim=1).view(-1)
-            distrib = torch.distributions.Categorical(posterior)
+            out_fine = self.O4(tf.relu(self.O3(hidden_fine)))
+            posterior = tf.softmax(out_fine, dim=1).view(-1)
+            distrib = tf.distributions.Categorical(posterior)
             out_fine = distrib.sample()
             f_outputs.append(out_fine)
     
             # Put the hidden state back together
-            hidden = torch.cat([hidden_coarse, hidden_fine], dim=1)
+            hidden = tf.concatenate([hidden_coarse, hidden_fine], dim=1)
             
             # Display progress
             speed = (i + 1) / (time.time() - start)
