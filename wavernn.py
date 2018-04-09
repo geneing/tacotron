@@ -242,19 +242,19 @@ class WaveRNN(tf.keras.Model):
         
              
     def init_hidden(self, batch_size=1) :
-        return tfe.Variable(tf.zeros([batch_size, self.hidden_size],dtype=float32), name='hidden_val')
+        return tfe.Variable(tf.zeros([batch_size, self.hidden_size],dtype=tf.float32), name='hidden_val')
         
     
     
     def print_stats(self) :
         parameters = filter(lambda p: p.requires_grad, self.parameters())
-        parameters = sum([np.prod(p.size()) for p in parameters]) / 1_000_000
+        parameters = sum([np.prod(p.size()) for p in parameters]) / 1000000
         print('Trainable Parameters: %.3f million' % parameters)
 
 
 ##%%
-
-model = WaveRNN()
+with tf.device("/gpu:0"):       
+    model = WaveRNN()
 
 ##%%
 x = sine_wave(freq=500, length=sample_rate * 30)
@@ -283,14 +283,14 @@ def train(model, optimizer, num_steps, seq_len=960) :
                 x_fine = fine_classes[:, j:j + 1]
                 x_input = np.concatenate([x_coarse, x_fine], axis=1)
                 x_input = x_input / 127.5 - 1.
-                x_input = tfe.Variable(x_input, dtype=float32)
+                x_input = tfe.Variable(x_input, dtype=tf.float32)
 
                 y_coarse = coarse_classes[:, j + 1]
                 y_fine = fine_classes[:, j + 1]
-                y_coarse = tfe.Variable(y_coarse)
-                y_fine = tfe.Variable(y_fine)
+                y_coarse = tfe.Variable(y_coarse, dtype=tf.int64)
+                y_fine = tfe.Variable(y_fine, dtype=tf.int64)
 
-                current_coarse = tf.cast(y_coarse, dtype=float32) / 127.5 - 1.
+                current_coarse = tf.cast(y_coarse, dtype=tf.float32) / 127.5 - 1.
                 current_coarse = tf.expand_dims(current_coarse, axis=0)
 
                 out_coarse, out_fine, hidden = model([x_input, hidden, current_coarse])
