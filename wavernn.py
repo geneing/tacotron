@@ -6,11 +6,15 @@ import time, sys, math
 import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.eager as tfe
+import os
 
 from scipy.io import wavfile
 
 tf.enable_eager_execution()
 tf.logging.set_verbosity(tf.logging.INFO)
+
+checkpoint_directory = "/home/eugening/Neural/MachineLearning/Speech/logs/"
+checkpoint_prefix = os.path.join(checkpoint_directory, "ckpt")
 
 #%%
 
@@ -261,7 +265,7 @@ coarse_classes, fine_classes = split_signal(x)
 coarse_classes = np.reshape(coarse_classes, (1, -1))
 fine_classes = np.reshape(fine_classes, (1, -1))
 
-def train(model, optimizer, num_steps, seq_len=960) :
+def train(model, optimizer, num_steps, seq_len=960, checkpoint=None) :
     
     start = time.time()
     running_loss = 0
@@ -301,16 +305,23 @@ def train(model, optimizer, num_steps, seq_len=960) :
         running_loss += (loss / seq_len)
         
         grad = tape.gradient(loss, model.variables)
+        
+        print(grad)
+        
         optimizer.apply_gradients(zip(grad, model.variables), global_step=tf.train.get_or_create_global_step())
         
         speed = (step + 1) / (time.time() - start)
+        
+        checkpoint.save(file_prefix=checkpoint_prefix)
         
         sys.stdout.write('\rStep: %i/%i --- NLL: %.2f --- Speed: %.3f batches/second ' % 
                         (step + 1, num_steps, running_loss / (step + 1), speed))    
 
 with tf.device("/gpu:0"):        
     optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
-    train(model, optimizer, num_steps=50)
+    chkpt = tfe.Checkpoint(optimizer=optimizer, model=model)
+    
+    train(model, optimizer, num_steps=1, checkpoint=chkpt)
 
 #%%
 
