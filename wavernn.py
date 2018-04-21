@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+
+from datasets.datafeeder import DataFeeder
+from hparams import hparams, hparams_debug_string
+
 import matplotlib.pyplot as plt
 import time, sys, math
 import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.eager as tfe
 import os
+import librosa
 
 from scipy.io import wavfile
 
-tf.enable_eager_execution()
+#tf.enable_eager_execution()
 tf.logging.set_verbosity(tf.logging.INFO)
 
 checkpoint_directory = "/home/eugening/Neural/MachineLearning/Speech/logs/"
@@ -90,180 +95,37 @@ c, f = split_signal(signal)
 
 #%%
 class WaveRNN(tf.keras.Model):
-    def __init__(self, hidden_size=896, quantisation=256) :
+    def __init__(self, hidden_size=896, quantisation=256):
         super(WaveRNN, self).__init__()
         
         self.hidden_size = hidden_size
-        self.split_size = hidden_size // 2
-        
-        # The main hidden state matmul
-        #self.hidden_size,
-        self.R = tf.keras.layers.Dense(3 * self.hidden_size, use_bias=False)
+
+        self.GRUCell = tf.keras.layers.GRUCell(self.hidden_size, use_bias=False)
         
         # Output fc layers
-        self.O1 = tf.keras.layers.Dense(self.split_size)
+        self.O1 = tf.keras.layers.Dense(self.hidden_size)
         self.O2 = tf.keras.layers.Dense(quantisation)
-        self.O3 = tf.keras.layers.Dense(self.split_size)
-        self.O4 = tf.keras.layers.Dense(quantisation)
-        
-        # Input fc layers
-        self.I_coarse = tf.keras.layers.Dense( 3 * self.split_size, use_bias=False)
-        self.I_fine = tf.keras.layers.Dense( 3 * self.split_size, use_bias=False)
-
-        # biases for the gates
-        self.bias_u = tfe.Variable(tf.zeros(self.hidden_size), name='bias_u')
-        self.bias_r = tfe.Variable(tf.zeros(self.hidden_size), name='bias_r')
-        self.bias_e = tfe.Variable(tf.zeros(self.hidden_size), name='bias_e')
 
     def call(self, inputs, training=False) :
-        prev_y, prev_hidden, current_coarse = inputs
-        # Main matmul - the projection is split 3 ways
-        R_hidden = self.R(prev_hidden)
-        R_u, R_r, R_e = tf.split(R_hidden, 3, axis=1) #tf.keras.layers.Lambda(lambda z: tf.split(z, 3, axis=1), arguments=R_hidden)
-        
-        # Project the prev input 
-        coarse_input_proj = self.I_coarse(prev_y)
-        I_coarse_u, I_coarse_r, I_coarse_e = \
-            tf.split(coarse_input_proj, 3, axis=1)
-
-        # Project the prev input and current coarse sample
-        fine_input = tf.concat([prev_y, current_coarse], axis=1)
-        fine_input_proj = self.I_fine(fine_input)
-        I_fine_u, I_fine_r, I_fine_e = \
-            tf.split(fine_input_proj, 3, axis=1)
-        
-        # concatenate for the gates
-        # TODO: Simplify all of this business 
-        I_u = tf.concat([I_coarse_u, I_fine_u], axis=1)
-        I_r = tf.concat([I_coarse_r, I_fine_r], axis=1)
-        I_e = tf.concat([I_coarse_e, I_fine_e], axis=1)
-        
-        # Compute all gates for coarse and fine 
-        u = tf.sigmoid(R_u + I_u + self.bias_u, name='u')
-        r = tf.sigmoid(R_r + I_r + self.bias_r, name='r')
-        e = tf.tanh(r * R_e + I_e + self.bias_e, name='e')
-        hidden = u * prev_hidden + (1. - u) * e
-        
-        # Split the hidden state
-        hidden_coarse, hidden_fine = tf.split(hidden, 2, axis=1)
-        
-        # Compute outputs 
-        out_coarse = self.O2(tf.nn.relu(self.O1(hidden_coarse)))
-        out_fine = self.O4(tf.nn.relu(self.O3(hidden_fine)))
-
-        return [out_coarse, out_fine, hidden]
+        current_input, prev_state = inputs
+        hidden, state = self.GRUCell.call(current_input, prev_state)
+        # Compute outputs
+        out = self.O2(tf.nn.relu(self.O1(hidden)))
+        return [out, state]
     
-        
-    def generate(self, seq_len) :
-        
-        # First split up the biases for the gates 
-        b_coarse_u, b_fine_u = tf.split(self.bias_u, 2)
-        b_coarse_r, b_fine_r = tf.split(self.bias_r, 2)
-        b_coarse_e, b_fine_e = tf.split(self.bias_e, 2)
-        
-        # Lists for the two output seqs
-        c_outputs, f_outputs = [], []
-        
-        # Some initial inputs
-        out_coarse = tfe.Variable(np.zeros([1]))
-        out_fine = tfe.Variable(np.zeros([1]))
-        
-        # We'll meed a hidden state
-        hidden = self.init_hidden()
-        
-        # Need a clock for display
-        start = time.time()
-        
-        # Loop for generation
-        for i in range(seq_len) :
-            
-            # Split into two hidden states
-            hidden_coarse, hidden_fine = \
-                tf.split(hidden, 2, axis=1)
-            
-            # Scale and concat previous predictions
-            out_coarse = tf.cast(tf.expand_dims(out_coarse, axis=0), dtype=tf.int64) / 127.5 - 1.
-            out_fine = tf.cast(tf.expand_dims(out_fine, axis=0), dtype=tf.int64) / 127.5 - 1.
-            prev_outputs = tf.concatenate([out_coarse, out_fine], axis=1)
-            
-            # Project input 
-            coarse_input_proj = self.I_coarse(prev_outputs)
-            I_coarse_u, I_coarse_r, I_coarse_e = \
-                tf.split(coarse_input_proj, 3, axis=1)
-            
-            # Project hidden state and split 6 ways
-            R_hidden = self.R(hidden)
-            R_coarse_u , R_fine_u, \
-            R_coarse_r, R_fine_r, \
-            R_coarse_e, R_fine_e = tf.split(R_hidden, 6, axis=1)
-        
-            # Compute the coarse gates
-            u = tf.sigmoid(R_coarse_u + I_coarse_u + b_coarse_u)
-            r = tf.sigmoid(R_coarse_r + I_coarse_r + b_coarse_r)
-            e = tf.tanh(r * R_coarse_e + I_coarse_e + b_coarse_e)
-            hidden_coarse = u * hidden_coarse + (1. - u) * e
-            
-            # Compute the coarse output
-            out_coarse = self.O2(tf.relu(self.O1(hidden_coarse)))
-            posterior = tf.softmax(out_coarse, dim=1).view(-1)
-            distrib = tf.distributions.Categorical(posterior)
-            out_coarse = distrib.sample()
-            c_outputs.append(out_coarse)
-            
-            # Project the [prev outputs and predicted coarse sample]
-            coarse_pred = out_coarse.float() / 127.5 - 1.
-            fine_input = tf.concatenate([prev_outputs, coarse_pred.unsqueeze(0)], dim=1)
-            fine_input_proj = self.I_fine(fine_input)
-            I_fine_u, I_fine_r, I_fine_e = \
-                tf.split(fine_input_proj, 3, axis=1)
-            
-            # Compute the fine gates
-            u = tf.sigmoid(R_fine_u + I_fine_u + b_fine_u)
-            r = tf.sigmoid(R_fine_r + I_fine_r + b_fine_r)
-            e = tf.tanh(r * R_fine_e + I_fine_e + b_fine_e)
-            hidden_fine = u * hidden_fine + (1. - u) * e
-        
-            # Compute the fine output
-            out_fine = self.O4(tf.relu(self.O3(hidden_fine)))
-            posterior = tf.softmax(out_fine, dim=1).view(-1)
-            distrib = tf.distributions.Categorical(posterior)
-            out_fine = distrib.sample()
-            f_outputs.append(out_fine)
-    
-            # Put the hidden state back together
-            hidden = tf.concatenate([hidden_coarse, hidden_fine], dim=1)
-            
-            # Display progress
-            speed = (i + 1) / (time.time() - start)
-            display('Gen: %i/%i -- Speed: %i',  (i + 1, seq_len, speed))
-        
-        coarse = torch.stack(c_outputs).squeeze(1).cpu().data.numpy()
-        fine = torch.stack(f_outputs).squeeze(1).cpu().data.numpy()        
-        output = combine_signal(coarse, fine)
-        
-        return output, coarse, fine
-        
-             
     def init_hidden(self, batch_size=1) :
         return tfe.Variable(tf.zeros([batch_size, self.hidden_size],dtype=tf.float32), name='hidden_val')
         
-    
-    
-    def print_stats(self) :
-        parameters = filter(lambda p: p.requires_grad, self.parameters())
-        parameters = sum([np.prod(p.size()) for p in parameters]) / 1000000
-        print('Trainable Parameters: %.3f million' % parameters)
-
-
 ##%%
+
+
 with tf.device("/gpu:0"):       
     model = WaveRNN()
 
 ##%%
-x = sine_wave(freq=500, length=sample_rate * 30)
-coarse_classes, fine_classes = split_signal(x)
-coarse_classes = np.reshape(coarse_classes, (1, -1))
-fine_classes = np.reshape(fine_classes, (1, -1))
+wav = sine_wave(freq=500, length=sample_rate * 30)
+wav_classes = np.reshape(wav, (1, -1))
+
 
 def train(model, optimizer, num_steps, seq_len=960, checkpoint=None) :
     
@@ -271,36 +133,21 @@ def train(model, optimizer, num_steps, seq_len=960, checkpoint=None) :
     running_loss = 0
     
     for step in range(num_steps) :
-        
         loss = 0
         hidden = model.init_hidden()
-        #optimizer.zero_grad()
-        rand_idx = np.random.randint(0, coarse_classes.shape[1] - seq_len - 1)
+        rand_idx = np.random.randint(0, wav_classes.shape[1] - seq_len - 1)
         
         with tfe.GradientTape() as tape:
             for i in range(seq_len) :
-
                 j = rand_idx + i
-
-                x_coarse = coarse_classes[:, j:j + 1]
-                x_fine = fine_classes[:, j:j + 1]
-                x_input = np.concatenate([x_coarse, x_fine], axis=1)
+                x_input = wav_classes[:, j:j + 1]
                 x_input = x_input / 127.5 - 1.
-                x_input = tfe.Variable(x_input, dtype=tf.float32)
+                x_in = tfe.Variable(x_input, dtype=tf.float32, name='x_input')
 
-                y_coarse = coarse_classes[:, j + 1]
-                y_fine = fine_classes[:, j + 1]
-                y_coarse = tfe.Variable(y_coarse, dtype=tf.int64)
-                y_fine = tfe.Variable(y_fine, dtype=tf.int64)
+                out_wav, hidden = model([x_in, hidden])
 
-                current_coarse = tf.cast(y_coarse, dtype=tf.float32) / 127.5 - 1.
-                current_coarse = tf.expand_dims(current_coarse, axis=0)
-
-                out_coarse, out_fine, hidden = model([x_input, hidden, current_coarse])
-
-                loss_coarse = tf.losses.sparse_softmax_cross_entropy(y_coarse, out_coarse )
-                loss_fine = tf.losses.sparse_softmax_cross_entropy(y_fine, out_fine)
-                loss += (loss_coarse + loss_fine)
+                loss_curr = tf.losses.sparse_softmax_cross_entropy(y_coarse, out_wav )
+                loss += loss_curr
 
         running_loss += (loss / seq_len)
         
@@ -315,7 +162,20 @@ def train(model, optimizer, num_steps, seq_len=960, checkpoint=None) :
         checkpoint.save(file_prefix=checkpoint_prefix)
         
         sys.stdout.write('\rStep: %i/%i --- NLL: %.2f --- Speed: %.3f batches/second ' % 
-                        (step + 1, num_steps, running_loss / (step + 1), speed))    
+                        (step + 1, num_steps, running_loss / (step + 1), speed))
+
+base_dir = '/home/eugening/Neural/MachineLearning/Speech/TrainingData/'
+input = 'LJSpeech-1.0.taco/train.txt'
+input_path = os.path.join(base_dir, input)
+
+coord = tf.train.Coordinator()
+with tf.variable_scope('datafeeder') as scope:
+    feeder = DataFeeder(coord, input_path, hparams)
+
+global_step = tf.Variable(0, name='global_step', trainable=False)
+
+with tf.variable_scope('model') as scope:
+    model = WaveRNN(hidden_size=896, quantisation=256)
 
 with tf.device("/gpu:0"):        
     optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
@@ -328,4 +188,14 @@ with tf.device("/gpu:0"):
 output, c, f = model.generate(5000)
 
 plt.plot(output[:300])
+
+#%%
+base_dir = '/home/eugening/Neural/MachineLearning/Speech/TrainingData/'
+input = 'LJSpeech-1.0.taco/train.txt'
+input_path = os.path.join(base_dir, input)
+
+coord = tf.train.Coordinator()
+with tf.variable_scope('datafeeder') as scope:
+    feeder = DataFeeder(coord, input_path, hparams)
+    
         

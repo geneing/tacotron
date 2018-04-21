@@ -28,7 +28,7 @@ class DataFeeder(threading.Thread):
     self._datadir = os.path.dirname(metadata_filename)
     with open(metadata_filename, encoding='utf-8') as f:
       self._metadata = [line.strip().split('|') for line in f]
-      hours = sum((int(x[2]) for x in self._metadata)) * hparams.frame_shift_ms / (3600 * 1000)
+      hours = sum((int(x[3]) for x in self._metadata)) * hparams.frame_shift_ms / (3600 * 1000)
       log('Loaded metadata for %d examples (%.2f hours)' % (len(self._metadata), hours))
 
     # Create placeholders for inputs and targets. Don't specify batch size because we want to
@@ -37,17 +37,19 @@ class DataFeeder(threading.Thread):
       tf.placeholder(tf.int32, [None, None], 'inputs'),
       tf.placeholder(tf.int32, [None], 'input_lengths'),
       tf.placeholder(tf.float32, [None, None, hparams.num_mels], 'mel_targets'),
-      tf.placeholder(tf.float32, [None, None, hparams.num_freq], 'linear_targets')
+      tf.placeholder(tf.float32, [None, None, hparams.num_freq], 'linear_targets'),
+      tf.placeholder(tf.float32, [None, None], 'wav_targets')
     ]
 
     # Create queue for buffering data:
-    queue = tf.FIFOQueue(8, [tf.int32, tf.int32, tf.float32, tf.float32], name='input_queue')
+    queue = tf.FIFOQueue(8, [tf.int32, tf.int32, tf.float32, tf.float32, tf.float32], name='input_queue')
     self._enqueue_op = queue.enqueue(self._placeholders)
     self.inputs, self.input_lengths, self.mel_targets, self.linear_targets = queue.dequeue()
     self.inputs.set_shape(self._placeholders[0].shape)
     self.input_lengths.set_shape(self._placeholders[1].shape)
     self.mel_targets.set_shape(self._placeholders[2].shape)
     self.linear_targets.set_shape(self._placeholders[3].shape)
+    self.wav_targets.set_shape(self._placeholders[4].shape)
 
     # Load CMUDict: If enabled, this will randomly substitute some words in the training data with
     # their ARPABet equivalents, which will allow you to also pass ARPABet to the model for
@@ -104,14 +106,15 @@ class DataFeeder(threading.Thread):
     meta = self._metadata[self._offset]
     self._offset += 1
 
-    text = meta[3]
+    text = meta[4]
     if self._cmudict and random.random() < _p_cmudict:
       text = ' '.join([self._maybe_get_arpabet(word) for word in text.split(' ')])
 
     input_data = np.asarray(text_to_sequence(text, self._cleaner_names), dtype=np.int32)
     linear_target = np.load(os.path.join(self._datadir, meta[0]))
     mel_target = np.load(os.path.join(self._datadir, meta[1]))
-    return (input_data, mel_target, linear_target, len(linear_target))
+    wav_target = np.load(os.path.join(self._datadir, meta[2]))
+    return (input_data, mel_target, linear_target, wav_target, len(linear_target))
 
 
   def _maybe_get_arpabet(self, word):
@@ -125,7 +128,8 @@ def _prepare_batch(batch, outputs_per_step):
   input_lengths = np.asarray([len(x[0]) for x in batch], dtype=np.int32)
   mel_targets = _prepare_targets([x[1] for x in batch], outputs_per_step)
   linear_targets = _prepare_targets([x[2] for x in batch], outputs_per_step)
-  return (inputs, input_lengths, mel_targets, linear_targets)
+  wav_targets = _prepare_targets([x[3] for x in batch], outputs_per_step)
+  return (inputs, input_lengths, mel_targets, linear_targets, wav_targets)
 
 
 def _prepare_inputs(inputs):
