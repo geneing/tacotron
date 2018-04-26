@@ -21,6 +21,7 @@ tf.logging.set_verbosity(tf.logging.INFO)
 checkpoint_directory = "/home/eugening/Neural/MachineLearning/Speech/logs/"
 checkpoint_prefix = os.path.join(checkpoint_directory, "ckpt")
 
+
 #%%
 
 
@@ -194,8 +195,31 @@ base_dir = '/home/eugening/Neural/MachineLearning/Speech/TrainingData/'
 input = 'LJSpeech-1.0.taco/train.txt'
 input_path = os.path.join(base_dir, input)
 
+hparams.batch_size = 8
+
 coord = tf.train.Coordinator()
 with tf.variable_scope('datafeeder') as scope:
-    feeder = DataFeeder(coord, input_path, hparams)
+    feeder = DataFeeder(coord, input_path, hparams, batches_per_group=4)
+
+sess = tf.Session()
+feeder.start_in_session(sess)
+
+model = WaveRNN()
+
+wav_target = feeder.wav_targets
+input_val = feeder.mel_targets
+
+output = []
+i=0
+while not coord.should_stop():
     
+    for 
+    o = sess.run(wav_target)
+    output.append(o)
+    print(i)
+    i+=1
+    
+    coord.request_stop()
+
+
         

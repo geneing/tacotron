@@ -9,7 +9,7 @@ from text import cmudict, text_to_sequence
 from util.infolog import log
 
 
-_batches_per_group = 32
+#_batches_per_group = 32
 _p_cmudict = 0.5
 _pad = 0
 
@@ -17,10 +17,11 @@ _pad = 0
 class DataFeeder(threading.Thread):
   '''Feeds batches of data into a queue on a background thread.'''
 
-  def __init__(self, coordinator, metadata_filename, hparams):
+  def __init__(self, coordinator, metadata_filename, hparams, batches_per_group = 32):
     super(DataFeeder, self).__init__()
     self._coord = coordinator
     self._hparams = hparams
+    self._batches_per_group = batches_per_group
     self._cleaner_names = [x.strip() for x in hparams.cleaners.split(',')]
     self._offset = 0
 
@@ -73,6 +74,7 @@ class DataFeeder(threading.Thread):
   def run(self):
     try:
       while not self._coord.should_stop():
+        print("Enquing")
         self._enqueue_next_group()
     except Exception as e:
       traceback.print_exc()
@@ -85,7 +87,7 @@ class DataFeeder(threading.Thread):
     # Read a group of examples:
     n = self._hparams.batch_size
     r = self._hparams.outputs_per_step
-    examples = [self._get_next_example() for i in range(n * _batches_per_group)]
+    examples = [self._get_next_example() for i in range(n * self._batches_per_group)]
 
     # Bucket examples based on similar output sequence length for efficiency:
     examples.sort(key=lambda x: x[-1])
@@ -128,7 +130,7 @@ def _prepare_batch(batch, outputs_per_step):
   input_lengths = np.asarray([len(x[0]) for x in batch], dtype=np.int32)
   mel_targets = _prepare_targets([x[1] for x in batch], outputs_per_step)
   linear_targets = _prepare_targets([x[2] for x in batch], outputs_per_step)
-  wav_targets = _prepare_targets([x[3] for x in batch], outputs_per_step)
+  wav_targets = _prepare_targets1D([x[3] for x in batch], outputs_per_step)
   return (inputs, input_lengths, mel_targets, linear_targets, wav_targets)
 
 
@@ -141,6 +143,10 @@ def _prepare_targets(targets, alignment):
   max_len = max((len(t) for t in targets)) + 1
   return np.stack([_pad_target(t, _round_up(max_len, alignment)) for t in targets])
 
+def _prepare_targets1D(targets, alignment):
+  max_len = max((len(t) for t in targets)) + 1
+  return np.stack([_pad_target1D(t, _round_up(max_len, alignment)) for t in targets])
+
 
 def _pad_input(x, length):
   return np.pad(x, (0, length - x.shape[0]), mode='constant', constant_values=_pad)
@@ -149,6 +155,8 @@ def _pad_input(x, length):
 def _pad_target(t, length):
   return np.pad(t, [(0, length - t.shape[0]), (0,0)], mode='constant', constant_values=_pad)
 
+def _pad_target1D(t, length):
+  return np.pad(t, [(0, length - t.shape[0])], mode='constant', constant_values=_pad)
 
 def _round_up(x, multiple):
   remainder = x % multiple
