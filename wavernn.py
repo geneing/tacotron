@@ -117,7 +117,7 @@ class WaveRNN(tf.keras.Model):
     def init_hidden(self, batch_size=1) :
         return tfe.Variable(tf.zeros([batch_size, self.hidden_size],dtype=tf.float32), name='hidden_val')
         
-##%%
+#%%
 
 
 with tf.device("/gpu:0"):       
@@ -209,17 +209,17 @@ model = WaveRNN()
 wav_target = feeder.wav_targets
 input_val = feeder.mel_targets
 
-output = []
+inp = []
 i=0
 while not coord.should_stop():
-    
-    for 
-    o = sess.run(wav_target)
-    output.append(o)
+    init_hidden = model.init_hidden(hparams.batch_size)
+    val = sess.run(wav_target)
+    #model.GRUCell.build('weights',val.shape[1])
+    outp = model([wav_target, init_hidden])
+    inp.append(sess.run(outp))
     print(i)
     i+=1
-    
-    coord.request_stop()
+    if i>5: coord.request_stop()
 
 
         
