@@ -101,7 +101,7 @@ class WaveRNN(tf.keras.Model):
         
         self.hidden_size = hidden_size
 
-        self.GRUCell = tf.keras.layers.GRUCell(self.hidden_size, use_bias=False)
+        self.GRU = tf.keras.layers.GRU(self.hidden_size, use_bias=False)
         
         # Output fc layers
         self.O1 = tf.keras.layers.Dense(self.hidden_size)
@@ -109,7 +109,7 @@ class WaveRNN(tf.keras.Model):
 
     def call(self, inputs, training=False) :
         current_input, prev_state = inputs
-        hidden, state = self.GRUCell.call(current_input, prev_state)
+        hidden, state = self.GRU.call(current_input, prev_state)
         # Compute outputs
         out = self.O2(tf.nn.relu(self.O1(hidden)))
         return [out, state]
@@ -204,10 +204,23 @@ with tf.variable_scope('datafeeder') as scope:
 sess = tf.Session()
 feeder.start_in_session(sess)
 
-model = WaveRNN()
+#model = WaveRNN()
 
 wav_target = feeder.wav_targets
 input_val = feeder.mel_targets
+
+
+model = tf.keras.Sequential()
+model.add(tf.keras.layers.GRU(896, input_shape=(wav_target.shape),use_bias=False))
+model.add(tf.keras.layers.Dense(896))
+model.add(tf.keras.layers.Dense(256, activation='relu'))
+
+model.compile(loss='binary_crossentropy', optimizer='adam')
+
+
+model.fit(wav_target, wav_target, batch_size=8, epochs = 15)
+
+#%%
 
 inp = []
 i=0
