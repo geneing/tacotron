@@ -96,7 +96,7 @@ class DataFeeder(threading.Thread):
 
     log('Generated %d batches of size %d in %.03f sec' % (len(batches), n, time.time() - start))
     for batch in batches:
-      feed_dict = dict(zip(self._placeholders, _prepare_batch(batch, r)))
+      feed_dict = dict(zip(self._placeholders, self._prepare_batch(batch, r)))
       self._session.run(self._enqueue_op, feed_dict=feed_dict)
 
 
@@ -116,6 +116,7 @@ class DataFeeder(threading.Thread):
     linear_target = np.load(os.path.join(self._datadir, meta[0]))
     mel_target = np.load(os.path.join(self._datadir, meta[1]))
     wav_target = np.load(os.path.join(self._datadir, meta[2]))
+    #wav_target=(((wav_target+1.)/2.)*self._hparams.quantization).astype(dtype=int)
     return (input_data, mel_target, linear_target, wav_target, len(linear_target))
 
 
@@ -124,14 +125,15 @@ class DataFeeder(threading.Thread):
     return '{%s}' % arpabet[0] if arpabet is not None and random.random() < 0.5 else word
 
 
-def _prepare_batch(batch, outputs_per_step):
-  random.shuffle(batch)
-  inputs = _prepare_inputs([x[0] for x in batch])
-  input_lengths = np.asarray([len(x[0]) for x in batch], dtype=np.int32)
-  mel_targets = _prepare_targets([x[1] for x in batch], outputs_per_step)
-  linear_targets = _prepare_targets([x[2] for x in batch], outputs_per_step)
-  wav_targets = _prepare_targets1D([x[3] for x in batch], outputs_per_step)
-  return (inputs, input_lengths, mel_targets, linear_targets, wav_targets)
+  def _prepare_batch(self, batch, outputs_per_step):
+      random.shuffle(batch)
+      inputs = _prepare_inputs([x[0] for x in batch])
+      input_lengths = np.asarray([len(x[0]) for x in batch], dtype=np.int32)
+      mel_targets = _prepare_targets([x[1] for x in batch], outputs_per_step)
+      linear_targets = _prepare_targets([x[2] for x in batch], outputs_per_step)
+      wav_targets = _prepare_targets1D([x[3] for x in batch], outputs_per_step)
+      
+      return (inputs, input_lengths, mel_targets, linear_targets, wav_targets)
 
 
 def _prepare_inputs(inputs):
