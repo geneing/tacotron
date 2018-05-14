@@ -54,7 +54,7 @@ def _process_utterance(out_dir, index, wav_path, labels_path, text):
   mel_filename = 'blizzard-mel-%05d.npy' % index
   np.save(os.path.join(out_dir, spectrogram_filename), spectrogram.T, allow_pickle=False)
   np.save(os.path.join(out_dir, mel_filename), mel_spectrogram.T, allow_pickle=False)
-  return (spectrogram_filename, mel_filename, n_frames, text)
+  return (spectrogram_filename, mel_filename, n_frames, len(wav), text)
 
 
 def _parse_labels(path):
