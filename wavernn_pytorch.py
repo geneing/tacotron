@@ -7,7 +7,7 @@ from torch.utils.data import Dataset, DataLoader
 import pandas as pd
 import numpy as np
 
-from util import audio
+#from util import audio
 
 #%%
 class SpeechDataset(Dataset):
@@ -30,17 +30,43 @@ root_dir='/home/eugening/Neural/MachineLearning/Speech/TrainingData/LJSpeech-1.0
 ds = SpeechDataset(root_dir)
 
 #%%
-import pdb
+
+quant = 256
+hidden_size = 896
+eye = np.eye(quant,dtype=float32)
 def mergeSamples(inp):
     wavlist=[]
     strlist=[]
     for v in inp:
-        wavlist.append(v['wav'])
+        quantized = (((v['wav']+1.)/2.)*quant).astype(int)
+        
+        wavlist.append(quantized)
         strlist.append(v['text'])
-    maxlen = max([len(x) for x in wavlist])
-    wavlist = np.asarray([  np.pad(x, ((0,maxlen-x.size),), 'constant') for x in wavlist])
+    maxlen = max([x.shape[0] for x in wavlist])
     
+    wavlist = np.asarray([  np.pad(x, ((0,maxlen-x.shape[0]),), 'constant') for x in wavlist])
     return {'wav':wavlist.T, 'text':strlist}
 
-dl = DataLoader( ds, batch_size = 3, shuffle=False, collate_fn = mergeSamples )
-for v in dl: break
+dl = DataLoader( ds, batch_size = 4, shuffle=True, collate_fn = mergeSamples )
+
+#%%
+
+gru = torch.nn.GRUCell(quant, hidden_size)
+O1 = torch.nn.Linear(hidden_size, hidden_size//2)
+relu = torch.nn.ReLU()
+O2 = torch.nn.Linear(hidden_size//2, quant)
+
+
+for sample in dl:
+    wav = sample['wav']
+    h_rnn = torch.zeros([wav.shape[1], hidden_size])
+    
+    for i in xrange(np.min(1000,wav.shape[0])):
+        coded_wav = torch.tensor(eye[ wav[i, :] ])
+        h_rnn = gru(coded_wav, h_rnn)
+        o1 = relu(O1(h_rnn))
+        o2 = O2(o1)    
+        
+    break
+
+
