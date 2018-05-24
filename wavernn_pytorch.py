@@ -56,17 +56,27 @@ O1 = torch.nn.Linear(hidden_size, hidden_size//2)
 relu = torch.nn.ReLU()
 O2 = torch.nn.Linear(hidden_size//2, quant)
 
+params=[]
+for p in [gru, O1, O2]:
+    params += list(p.parameters()) 
+
+optimizer = torch.optim.Adam(params, lr = 0.0001)
 
 for sample in dl:
     wav = sample['wav']
     h_rnn = torch.zeros([wav.shape[1], hidden_size])
-    
-    for i in xrange(np.min(1000,wav.shape[0])):
+    optimizer.zero_grad()
+    loss = 0
+    for i in range(min([1000,wav.shape[0]])):
         coded_wav = torch.tensor(eye[ wav[i, :] ])
         h_rnn = gru(coded_wav, h_rnn)
         o1 = relu(O1(h_rnn))
         o2 = O2(o1)    
         
+        loss += torch.nn.functional.cross_entropy(o2, wav[i, :])
+    print(loss)
+    loss.backward()
+    
     break
 
 
