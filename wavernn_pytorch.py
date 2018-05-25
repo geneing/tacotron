@@ -51,10 +51,10 @@ dl = DataLoader( ds, batch_size = 4, shuffle=True, collate_fn = mergeSamples )
 
 #%%
 
-gru = torch.nn.GRUCell(quant, hidden_size)
-O1 = torch.nn.Linear(hidden_size, hidden_size//2)
-relu = torch.nn.ReLU()
-O2 = torch.nn.Linear(hidden_size//2, quant)
+gru = torch.nn.GRUCell(quant, hidden_size).cuda()
+O1 = torch.nn.Linear(hidden_size, hidden_size//2).cuda()
+relu = torch.nn.ReLU().cuda()
+O2 = torch.nn.Linear(hidden_size//2, quant).cuda()
 
 params=[]
 for p in [gru, O1, O2]:
@@ -64,19 +64,19 @@ optimizer = torch.optim.Adam(params, lr = 0.0001)
 
 for sample in dl:
     wav = sample['wav']
-    h_rnn = torch.zeros([wav.shape[1], hidden_size])
+    h_rnn = torch.zeros([wav.shape[1], hidden_size]).cuda()
     optimizer.zero_grad()
     loss = 0
     for i in range(min([1000,wav.shape[0]])):
-        coded_wav = torch.tensor(eye[ wav[i, :] ])
+        coded_wav = torch.tensor(eye[ wav[i, :] ]).cuda()
         h_rnn = gru(coded_wav, h_rnn)
         o1 = relu(O1(h_rnn))
         o2 = O2(o1)    
         
-        loss += torch.nn.functional.cross_entropy(o2, wav[i, :])
+        loss += torch.nn.functional.cross_entropy(o2, torch.tensor(wav[i+1, :]).cuda())
     print(loss)
     loss.backward()
-    
-    break
+    optimizer.step()
+    #break
 
 
