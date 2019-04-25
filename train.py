@@ -75,7 +75,13 @@ def train(log_dir, args):
   saver = tf.train.Saver(max_to_keep=5, keep_checkpoint_every_n_hours=2)
 
   # Train!
-  with tf.Session() as sess:
+  config = tf.ConfigProto()
+  config.gpu_options.allow_growth = True
+  config.allow_soft_placement = True
+  
+  run_options = None #tf.RunOptions(report_tensor_allocations_upon_oom = True)
+  
+  with tf.Session(config=config) as sess:
     try:
       summary_writer = tf.summary.FileWriter(log_dir, sess.graph)
       sess.run(tf.global_variables_initializer())
@@ -89,12 +95,15 @@ def train(log_dir, args):
           log('Resuming from checkpoint: %s at commit: %s' % (checkpoint_state.model_checkpoint_path, commit), slack=True)
       else:
         log('Starting new training run at commit: %s' % commit, slack=True)
-
+      
+      tf.train.write_graph(sess.graph.as_graph_def(), '.', os.path.join(log_dir,'tacotron_model.pbtxt'), as_text=True)
+      tf.train.write_graph(sess.graph.as_graph_def(), '.', os.path.join(log_dir,'tacotron_model.pb'), as_text=False)
+      
       feeder.start_in_session(sess)
 
       while not coord.should_stop():
         start_time = time.time()
-        step, loss, opt = sess.run([global_step, model.loss, model.optimize])
+        step, loss, opt = sess.run([global_step, model.loss, model.optimize], options=run_options)
         time_window.append(time.time() - start_time)
         loss_window.append(loss)
         message = 'Step %-7d [%.03f sec/step, loss=%.05f, avg_loss=%.05f]' % (
@@ -113,12 +122,15 @@ def train(log_dir, args):
           log('Saving checkpoint to: %s-%d' % (checkpoint_path, step))
           saver.save(sess, checkpoint_path, global_step=step)
           log('Saving audio and alignment...')
-          input_seq, spectrogram, alignment = sess.run([
-            model.inputs[0], model.linear_outputs[0], model.alignments[0]])
+          input_seq, spectrogram, mel_outputs, mel_t, alignment = sess.run([
+            model.inputs[0], model.linear_outputs[0], model.mel_outputs[0], model.mel_targets[0], model.alignments[0]])
           waveform = audio.inv_spectrogram(spectrogram.T)
           audio.save_wav(waveform, os.path.join(log_dir, 'step-%d-audio.wav' % step))
           plot.plot_alignment(alignment, os.path.join(log_dir, 'step-%d-align.png' % step),
             info='%s, %s, %s, step=%d, loss=%.5f' % (args.model, commit, time_string(), step, loss))
+          plot.plot_spectrogram(mel_outputs, os.path.join(log_dir, 'step-{}-eval-mel-spectrogram.png'.format(step)),
+                                title='{}, {}, step={}, loss={:.5f}'.format(args.model, time_string(), step, loss), target_spectrogram=mel_t)
+
           log('Input: %s' % sequence_to_text(input_seq))
 
     except Exception as e:

@@ -26,12 +26,12 @@ hparams = tf.contrib.training.HParams(
   embed_depth=512,
   prenet_depths=[256, 256],
   encoder_depth=256,
-  postnet_depth=512,
+  postnet_depth=256,
   attention_depth=128,
   decoder_depth=1024,
 
   # Training:
-  batch_size=32,
+  batch_size=64,
   adam_beta1=0.9,
   adam_beta2=0.999,
   reg_weight = 1e-6,
@@ -40,7 +40,7 @@ hparams = tf.contrib.training.HParams(
   use_cmudict=False,  # Use CMUDict during training to learn pronunciation of ARPAbet phonemes
 
   # Eval:
-  max_iters=300,
+  max_iters=1000,
   griffin_lim_iters=60,
   power=1.2,              # Power to raise magnitudes to prior to Griffin-Lim
 )

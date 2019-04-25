@@ -95,6 +95,9 @@ def _process_utterance(out_dir, index, wav_path, text):
     print('file {} present in csv metadata is not present in wav folder. skipping!'.format(
       wav_path))
     return None
+
+  #M-AILABS extra silence specific
+  wav = audio.trim_silence(wav)
   
   # Compute the linear-scale spectrogram from the wav:
   spectrogram = audio.spectrogram(wav).astype(np.float32)
