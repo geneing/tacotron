@@ -47,7 +47,7 @@ def main():
     help='Hyperparameter overrides as a comma-separated list of name=value pairs')
   args = parser.parse_args()
   os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-  os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+  #os.environ['CUDA_VISIBLE_DEVICES'] = '1'
   hparams.parse(args.hparams)
   run_eval(args.checkpoint)
 

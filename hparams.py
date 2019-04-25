@@ -8,9 +8,9 @@ hparams = tf.contrib.training.HParams(
   cleaners='english_cleaners',
 
   # Audio:
-  num_mels=160,
+  num_mels=80,
   num_freq=1025,
-  sample_rate=24000,
+  sample_rate=16000,
   frame_length_ms=50,
   frame_shift_ms=12.5,
   preemphasis=0.97,
@@ -18,11 +18,11 @@ hparams = tf.contrib.training.HParams(
   ref_level_db=20,
   max_frame_num=1000,
   max_abs_value = 4,
-  fmin = 125, # for male, set 55
+  fmin = 75, # for male, set 55
   fmax = 7600, # for male, set 3600
 
   # Model:
-  outputs_per_step=5,
+  outputs_per_step=2,
   embed_depth=512,
   prenet_depths=[256, 256],
   encoder_depth=256,
