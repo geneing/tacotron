@@ -24,8 +24,15 @@ def preprocess_ljspeech(args):
 def preprocess_mailabs(args):
   in_dir = os.path.expanduser(args.base_dir)
   out_dir = os.path.join(args.base_dir, args.output)
+  mel_dir = os.path.join(out_dir, 'mels')
+  wav_dir = os.path.join(out_dir, 'audio')
+  linear_dir = os.path.join(out_dir, 'linear')
   os.makedirs(out_dir, exist_ok=True)
-  metadata = mailabs.build_from_path(in_dir, out_dir, args, tqdm=tqdm)
+  os.makedirs(mel_dir, exist_ok=True)
+  os.makedirs(wav_dir, exist_ok=True)
+  os.makedirs(linear_dir, exist_ok=True)
+
+  metadata = mailabs.build_from_path(in_dir, mel_dir, linear_dir, wav_dir, out_dir, args, hparams, tqdm=tqdm)
   write_metadata(metadata, out_dir)
 
 

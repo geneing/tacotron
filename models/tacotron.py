@@ -75,7 +75,7 @@ class Tacotron():
 
       (decoder_outputs, stop_token_outputs, _), final_decoder_state, _ = tf.contrib.seq2seq.dynamic_decode(
          CustomDecoder(decoder_cell, helper, decoder_init_state),
-         maximum_iterations=hp.max_iters)                                                          # [N, T_out/r, M*r]
+         maximum_iterations=hp.max_frame_num)                                                          # [N, T_out/r, M*r]
 
       # Reshape outputs to be one output per entry
       mel_outputs = tf.reshape(decoder_outputs, [batch_size, -1, hp.num_mels])                     # [N, T_out, M]

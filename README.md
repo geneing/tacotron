@@ -155,15 +155,15 @@ Pull requests are welcome!
     spike). **Update**: a recent [fix](https://github.com/keithito/tacotron/pull/7) to gradient
     clipping by @candlewill may have fixed this.
     
-  * During eval and training, audio length is limited to `max_iters * outputs_per_step * frame_shift_ms`
-    milliseconds. With the defaults (max_iters=200, outputs_per_step=5, frame_shift_ms=12.5), this is
+  * During eval and training, audio length is limited to `max_frame_num * outputs_per_step * frame_shift_ms`
+    milliseconds. With the defaults (max_frame_num=200, outputs_per_step=5, frame_shift_ms=12.5), this is
     12.5 seconds.
     
     If your training examples are longer, you will see an error like this:
     `Incompatible shapes: [32,1340,80] vs. [32,1000,80]`
     
-    To fix this, you can set a larger value of `max_iters` by passing `--hparams="max_iters=300"` to
-    train.py (replace "300" with a value based on how long your audio is and the formula above).
+    To fix this, you can set a larger value of `max_frame_num` by passing `--hparams="max_frame_num=2000"` to
+    train.py (replace "2000" with a value based on how long your audio is and the formula above).
     
   * Here is the expected loss curve when training on LJ Speech with the default hyperparameters:
     ![Loss curve](https://user-images.githubusercontent.com/1945356/36077599-c0513e4a-0f21-11e8-8525-07347847720c.png)

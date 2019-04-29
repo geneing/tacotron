@@ -29,7 +29,7 @@ class DataFeeder(threading.Thread):
     self._datadir = os.path.dirname(metadata_filename)
     with open(metadata_filename, encoding='utf-8') as f:
       self._metadata = [line.strip().split('|') for line in f]
-      hours = sum((int(x[2]) for x in self._metadata)) * hparams.frame_shift_ms / (3600 * 1000)
+      hours = sum((int(x[3]) for x in self._metadata)) * hparams.frame_shift_ms / (3600 * 1000)
       log('Loaded metadata for %d examples (%.2f hours)' % (len(self._metadata), hours))
 
     # Create placeholders for inputs and targets. Don't specify batch size because we want to
@@ -112,8 +112,8 @@ class DataFeeder(threading.Thread):
       text = ' '.join([self._maybe_get_arpabet(word) for word in text.split(' ')])
 
     input_data = np.asarray(text_to_sequence(text, self._cleaner_names), dtype=np.int32)
-    linear_target = np.load(os.path.join(self._datadir, meta[0]))
-    mel_target = np.load(os.path.join(self._datadir, meta[1]))
+    linear_target = np.load(os.path.join(*(self._datadir, 'linear',meta[2])))
+    mel_target = np.load(os.path.join(*(self._datadir, 'mels', meta[1])))
     stop_token_target = np.asarray([0.] * len(mel_target))
     return (input_data, mel_target, linear_target, stop_token_target, len(linear_target))
 

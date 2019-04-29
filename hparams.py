@@ -40,7 +40,6 @@ hparams = tf.contrib.training.HParams(
   use_cmudict=False,  # Use CMUDict during training to learn pronunciation of ARPAbet phonemes
 
   # Eval:
-  max_iters=1000,
   griffin_lim_iters=60,
   power=1.2,              # Power to raise magnitudes to prior to Griffin-Lim
 )
